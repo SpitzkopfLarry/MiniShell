@@ -10,16 +10,19 @@
 
 bool running = true;
 time_t start_time;
-std::map<pid_t, char*> background_jobs;
+std::map<pid_t, std::string> background_jobs;
 
-// Signalhandler für SIGINT und SIGCHLD
+void handle_signal(int sig);
 void handle_signal(int sig) {
     if (sig == SIGINT) {
         std::cout << "\nDo you really want to quit (y/n)? ";
+        std::cout.flush();
         std::string response;
         std::getline(std::cin, response);
         if (response == "y") {
             running = false;
+        } else {
+            std::cout << std::endl;
         }
     } else if (sig == SIGCHLD) {
         // Behandelt beendete Kindprozesse
@@ -44,15 +47,17 @@ std::vector<char*> parse_command(std::string& input, bool& run_in_background) {
     }
 
     std::istringstream iss(input);
-    std::vector<char*> args;
+    std::vector<std::string> tokens;
     std::string token;
     while (iss >> token) {
-        char* arg = new char[token.size() + 1];
-        std::strcpy(arg, token.c_str());
-        args.push_back(arg);
+        tokens.push_back(token);
+    }
+
+    std::vector<char*> args;
+    for (auto& t : tokens) {
+        args.push_back(&t[0]);
     }
     args.push_back(nullptr);
-
     return args;
 }
 
@@ -64,13 +69,7 @@ void execute_command(std::vector<char*>& args, bool run_in_background) {
         return;
     } else if (pid == 0) {
         if (execvp(args[0], args.data()) == -1) {
-            std::cerr << "Error executing command: ";
-            for (int i = 0; i < args.size(); i++) {
-                if (args[i] != nullptr) {
-                    std::cout << args[i] << " ";
-                }
-            }
-            std::cout << std::endl;
+            std::cerr << "Unknown command: " << args[0] << std::endl;
             exit(EXIT_FAILURE);
         }
     } else {
@@ -84,10 +83,25 @@ void execute_command(std::vector<char*>& args, bool run_in_background) {
     }
 }
 
+void setup_signal_handlers() {
+    struct sigaction sa_int;
+    struct sigaction sa_chld;
+
+    sa_int.sa_handler = handle_signal;
+    sa_chld.sa_handler = handle_signal;
+
+    sigemptyset(&sa_int.sa_mask);
+    sigemptyset(&sa_chld.sa_mask);
+
+    sa_int.sa_flags = 0;
+    sa_chld.sa_flags = SA_RESTART;  // Restart functions if interrupted by handler
+
+    sigaction(SIGINT, &sa_int, nullptr);
+    sigaction(SIGCHLD, &sa_chld, nullptr);
+}
+
 int main() {
-    // Setzen der Signalhandler
-    signal(SIGINT, handle_signal);
-    signal(SIGCHLD, handle_signal);
+    setup_signal_handlers();
     start_time = time(nullptr);
 
     std::cout << "Welcome to the shell!" << std::endl;
@@ -96,10 +110,14 @@ int main() {
         char cwd[1024];
         getcwd(cwd, sizeof(cwd));
         std::cout << cwd << " > ";
+        std::cout.flush();
 
         std::string input;
         if (!std::getline(std::cin, input)) {
-            break;
+            if (!running) {
+                break;
+            }
+            continue;
         }
 
         if (input.empty()) {
@@ -122,4 +140,3 @@ int main() {
 
     return 0;
 }
-
