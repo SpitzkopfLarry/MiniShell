@@ -10,7 +10,7 @@
 
 bool running = true;
 time_t start_time;
-std::map<pid_t, std::string> background_jobs;
+std::map<pid_t, char*> background_jobs;
 
 // Signalhandler für SIGINT und SIGCHLD
 void handle_signal(int sig) {
@@ -44,17 +44,15 @@ std::vector<char*> parse_command(std::string& input, bool& run_in_background) {
     }
 
     std::istringstream iss(input);
-    std::vector<std::string> tokens;
+    std::vector<char*> args;
     std::string token;
     while (iss >> token) {
-        tokens.push_back(token);
-    }
-
-    std::vector<char*> args;
-    for (auto& t : tokens) {
-        args.push_back(&t[0]);
+        char* arg = new char[token.size() + 1];
+        std::strcpy(arg, token.c_str());
+        args.push_back(arg);
     }
     args.push_back(nullptr);
+
     return args;
 }
 
@@ -66,7 +64,13 @@ void execute_command(std::vector<char*>& args, bool run_in_background) {
         return;
     } else if (pid == 0) {
         if (execvp(args[0], args.data()) == -1) {
-            std::cerr << "Unknown command: " << args[0] << std::endl;
+            std::cerr << "Error executing command: ";
+            for (int i = 0; i < args.size(); i++) {
+                if (args[i] != nullptr) {
+                    std::cout << args[i] << " ";
+                }
+            }
+            std::cout << std::endl;
             exit(EXIT_FAILURE);
         }
     } else {
@@ -85,6 +89,8 @@ int main() {
     signal(SIGINT, handle_signal);
     signal(SIGCHLD, handle_signal);
     start_time = time(nullptr);
+
+    std::cout << "Welcome to the shell!" << std::endl;
 
     while (running) {
         char cwd[1024];
@@ -116,3 +122,4 @@ int main() {
 
     return 0;
 }
+
