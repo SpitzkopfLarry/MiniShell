@@ -12,17 +12,20 @@ bool running = true;
 time_t start_time;
 std::map<pid_t, std::string> background_jobs;
 
-// Signalhandler für SIGINT und SIGCHLD
+void handle_signal(int sig);
 void handle_signal(int sig) {
     if (sig == SIGINT) {
         std::cout << "\nDo you really want to quit (y/n)? ";
+        std::cout.flush();
         std::string response;
         std::getline(std::cin, response);
         if (response == "y") {
             running = false;
+        } else {
+            std::cout << std::endl;
         }
     } else if (sig == SIGCHLD) {
-        // Behandelt beendete Kindprozesse
+        // Handle terminated child processes
         int status;
         pid_t pid;
         while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
@@ -34,40 +37,39 @@ void handle_signal(int sig) {
     }
 }
 
-// Parsen des Kommandos und Überprüfen, ob es im Hintergrund laufen soll
-std::vector<std::string> parse_command(std::string& input, bool& run_in_background) {
-    std::vector<std::string> args;
+// Parse the command and check if it should run in the background
+std::vector<char*> parse_command(std::string& input, bool& run_in_background) {
+    if (!input.empty() && input.back() == '&') {
+        run_in_background = true;
+        input.pop_back();
+    } else {
+        run_in_background = false;
+    }
+
     std::istringstream iss(input);
+    std::vector<std::string> tokens;
     std::string token;
     while (iss >> token) {
-        if (token == "&") {
-            run_in_background = true;
-        } else {
-            args.push_back(token);
-        }
+        tokens.push_back(token);
     }
-    if (!args.empty() && args.back() == "&") {
-        run_in_background = true;
-        args.pop_back();
+
+    std::vector<char*> args;
+    for (auto& t : tokens) {
+        args.push_back(strdup(t.c_str()));
     }
+    args.push_back(nullptr);
     return args;
 }
 
-// Starten eines Prozesses mit den angegebenen Argumenten
-void execute_command(const std::vector<std::string>& args, bool run_in_background) {
-    std::vector<char*> c_args;
-    for (const auto& arg : args) {
-        c_args.push_back(const_cast<char*>(arg.c_str()));
-    }
-    c_args.push_back(nullptr);
-
+// Start a process with the given arguments
+void execute_command(std::vector<char*>& args, bool run_in_background) {
     pid_t pid = fork();
     if (pid < 0) {
         std::cerr << "Error creating process" << std::endl;
         return;
     } else if (pid == 0) {
-        if (execvp(c_args[0], c_args.data()) == -1) {
-            std::cerr << "Error executing command: " << c_args[0] << std::endl;
+        if (execvp(args[0], args.data()) == -1) {
+            std::cerr << "Unknown command: " << args[0] << std::endl;
             exit(EXIT_FAILURE);
         }
     } else {
@@ -79,12 +81,31 @@ void execute_command(const std::vector<std::string>& args, bool run_in_backgroun
             waitpid(pid, &status, 0);
         }
     }
+
+    for (char* arg : args) {
+        free(arg);
+    }
+}
+
+void setup_signal_handlers() {
+    struct sigaction sa_int;
+    struct sigaction sa_chld;
+
+    sa_int.sa_handler = handle_signal;
+    sa_chld.sa_handler = handle_signal;
+
+    sigemptyset(&sa_int.sa_mask);
+    sigemptyset(&sa_chld.sa_mask);
+
+    sa_int.sa_flags = 0;
+    sa_chld.sa_flags = SA_RESTART;  // Restart functions if interrupted by handler
+
+    sigaction(SIGINT, &sa_int, nullptr);
+    sigaction(SIGCHLD, &sa_chld, nullptr);
 }
 
 int main() {
-    // Setzen der Signalhandler
-    signal(SIGINT, handle_signal);
-    signal(SIGCHLD, handle_signal);
+    setup_signal_handlers();
     start_time = time(nullptr);
 
     std::cout << "Welcome to the shell!" << std::endl;
@@ -93,22 +114,28 @@ int main() {
         char cwd[1024];
         getcwd(cwd, sizeof(cwd));
         std::cout << cwd << " > ";
+        std::cout.flush();
+
         std::string input;
         if (!std::getline(std::cin, input)) {
-            break;
+            if (!running) {
+                break;
+            }
+            continue;
         }
+
         if (input.empty()) {
             continue;
         }
-        bool run_in_background = false;
-        std::vector<std::string> args = parse_command(input, run_in_background);
 
-        if (args.empty()) {
-            continue;
-        }
+        bool run_in_background;
+        std::vector<char*> args = parse_command(input, run_in_background);
 
-        if (args[0] == "exit") {
+        if (args[0] == std::string("exit")) {
             running = false;
+            for (char* arg : args) {
+                free(arg);
+            }
             continue;
         }
 

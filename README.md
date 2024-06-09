@@ -1,7 +1,7 @@
 # MiniShell
 
 Die MiniShell ist ein einfacher Kommando-Interpreter, der in C++ implementiert ist und sich an der Unix-Shell orientiert. Sie ermöglicht das Ausführen von Befehlen, das Erstellen von Prozessen sowie das Verwalten von Hintergrundprozessen.
-
+Erstellt und getestet auf Arch Linux.
 ## Funktionalitäten
 
 Die MiniShell bietet folgende Funktionen:
